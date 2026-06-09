@@ -20,6 +20,8 @@ pub enum Action {
     NoSaveQuit,
     ShowHelp,
     ShowNumber,
+    Undo,
+    Redo,
 }
 
 impl TryFrom<KeyEvent> for Action {
@@ -69,6 +71,10 @@ impl TryFrom<KeyEvent> for Action {
             // ── Jumping ────────────────────────────────────
             Char('g') => Self::GotoBegin,
             Char('G') => Self::GotoEnd,
+
+            // ── Undo / Redo ────────────────────────────────
+            Char('u') => Self::Undo,
+            Char('r') if m.contains(M::CONTROL) => Self::Redo,
 
             // ── Item / Buffer management ───────────────────
             Char('d') => Self::Delete,
