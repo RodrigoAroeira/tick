@@ -77,11 +77,14 @@ impl App {
                 _ => Err(e)?,
             }
         }
-        save_to_file(
-            &self.file_path,
-            &self.curr_state.todos,
-            &self.curr_state.dones,
-        )?;
+
+        if !self.undo_stack.is_empty() {
+            save_to_file(
+                &self.file_path,
+                &self.curr_state.todos,
+                &self.curr_state.dones,
+            )?;
+        }
         Ok(())
     }
 }

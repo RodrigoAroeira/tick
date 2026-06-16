@@ -163,10 +163,11 @@ where
         return Ok(());
     }
 
-    let mut file = File::create(path)?;
+    let tmp_path = path.with_extension("tmp");
+    let mut tmp_file = File::create(&tmp_path)?;
     let mut write_to_file = |strs: &[String], str_begin: &str| -> io::Result<()> {
         for s in strs {
-            writeln!(file, "{}{}", str_begin, s)?;
+            writeln!(tmp_file, "{}{}", str_begin, s)?;
         }
         Ok(())
     };
@@ -174,6 +175,8 @@ where
     write_to_file(todos, globals::TODO_PREFIX)?;
     write_to_file(dones, globals::DONE_PREFIX)?;
 
+    tmp_file.flush()?;
+    std::fs::rename(tmp_path, path)?;
     println!("Saved state to {}", path.display());
 
     Ok(())
