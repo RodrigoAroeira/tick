@@ -51,6 +51,8 @@ where
         anyhow::bail!("Provided path is a directory: {:?}", path.display());
     }
 
+    let _ = std::fs::remove_file(path.with_extension("tmp"));
+
     let Ok(file) = File::open(path) else {
         return Ok(Default::default());
     };
