@@ -1,5 +1,6 @@
 use std::{
-    io, mem,
+    io::{self, Write},
+    mem,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -36,6 +37,18 @@ pub struct AppState {
     pub curr_tab: Tab,
     pub show_number: bool,
     pub mode: Mode,
+}
+
+pub(crate) enum AppSignal {
+    SaveAndQuit,
+    NoSave,
+    TerminalError(io::Error),
+}
+
+impl From<io::Error> for AppSignal {
+    fn from(e: io::Error) -> Self {
+        AppSignal::TerminalError(e)
+    }
 }
 
 impl AppState {
@@ -216,11 +229,12 @@ impl App {
     }
 
     pub fn run(&mut self) -> anyhow::Result<()> {
-        if let Err(e) = self.main_loop() {
-            match e.to_string().as_str() {
-                globals::NO_SAVE => return Ok(()),
-                globals::BREAK => {}
-                _ => Err(e)?,
+        match self.main_loop() {
+            Err(AppSignal::NoSave) => return Ok(()),
+            Err(AppSignal::SaveAndQuit) | Ok(()) => {}
+            Err(AppSignal::TerminalError(e)) => {
+                let _ = writeln!(io::stderr(), "Terminal error: {e}");
+                return Err(e.into());
             }
         }
 
@@ -237,7 +251,7 @@ impl App {
 
 /// Main loop / Screen Drawing
 impl App {
-    fn main_loop(&mut self) -> anyhow::Result<()> {
+    fn main_loop(&mut self) -> Result<(), AppSignal> {
         let _guard = ScreenGuard {};
         let mut term_size = Default::default();
         init_scr()?;
@@ -441,7 +455,7 @@ impl App {
 
 /// Actions / Mode Handling
 impl App {
-    fn execute_action(&mut self, action: Action) -> anyhow::Result<()> {
+    fn execute_action(&mut self, action: Action) -> Result<(), AppSignal> {
         match action {
             Action::Enter => {
                 self.push_state();
@@ -467,8 +481,8 @@ impl App {
                 self.push_state();
                 self.curr_state.delete();
             }
-            Action::SaveQuit => anyhow::bail!(globals::BREAK),
-            Action::NoSaveQuit => anyhow::bail!(globals::NO_SAVE),
+            Action::SaveQuit => return Err(AppSignal::SaveAndQuit),
+            Action::NoSaveQuit => return Err(AppSignal::NoSave),
             Action::ShowHelp => self.curr_state.show_help(),
             Action::ShowNumber => self.curr_state.toggle_show_number(),
             Action::Undo => self.undo(),
