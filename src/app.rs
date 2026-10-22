@@ -38,6 +38,152 @@ pub struct AppState {
     pub mode: Mode,
 }
 
+impl AppState {
+    fn enter_press(&mut self) {
+        match self.curr_tab {
+            Tab::Todos => {
+                if self.todos.is_empty() {
+                    return;
+                }
+                let value = self.todos.remove(self.todos_idx);
+                self.dones.push(value);
+            }
+            Tab::Dones => {
+                if self.dones.is_empty() {
+                    return;
+                }
+                let value = self.dones.remove(self.dones_idx);
+                self.todos.push(value);
+            }
+        }
+    }
+
+    fn switch_tab(&mut self, tab_action: TabAction) {
+        match tab_action {
+            TabAction::Toggle => self.curr_tab = self.curr_tab.toggle(),
+            TabAction::Left => self.curr_tab = Tab::Todos,
+            TabAction::Right => self.curr_tab = Tab::Dones,
+        }
+    }
+
+    fn cursor_move(&mut self, direction: KeyCode) {
+        let idx = match self.curr_tab {
+            Tab::Todos => &mut self.todos_idx,
+            Tab::Dones => &mut self.dones_idx,
+        };
+        match direction {
+            KeyCode::Down => *idx += 1,
+            KeyCode::Up => *idx = idx.saturating_sub(1),
+            _ => unreachable!("This spot should't be reachable"),
+        };
+    }
+
+    fn delete(&mut self) {
+        let (target_vec, idx) = match self.curr_tab {
+            Tab::Todos => (&mut self.todos, &self.todos_idx),
+            Tab::Dones => (&mut self.dones, &self.dones_idx),
+        };
+        if target_vec.is_empty() {
+            return;
+        }
+        target_vec.remove(*idx);
+    }
+
+    fn move_item(&mut self, direction: KeyCode) {
+        let (vec, idx) = match self.curr_tab {
+            Tab::Todos => (&mut self.todos, &mut self.todos_idx),
+            Tab::Dones => (&mut self.dones, &mut self.dones_idx),
+        };
+        if vec.is_empty() {
+            return;
+        }
+        let idx_val = *idx;
+        let new_idx = match direction {
+            KeyCode::Down => (idx_val + 1).min(vec.len() - 1),
+            KeyCode::Up => idx_val.saturating_sub(1),
+            _ => unreachable!(),
+        };
+        vec.swap(idx_val, new_idx);
+        *idx = new_idx;
+    }
+
+    fn start_insert(&mut self, direction: KeyCode) {
+        self.mode = Mode::Insert(InsertMode::New);
+        let (list, idx) = match self.curr_tab {
+            Tab::Todos => (&mut self.todos, &mut self.todos_idx),
+            Tab::Dones => (&mut self.dones, &mut self.dones_idx),
+        };
+        let insert_idx = match direction {
+            KeyCode::Up => *idx,
+            KeyCode::Down => *idx + 1,
+            _ => unreachable!(),
+        }
+        .clamp(0, list.len());
+        list.insert(insert_idx, String::new());
+        *idx = insert_idx;
+    }
+
+    fn start_edit(&mut self) {
+        if let Some(snap) = self.get_current_buffer().cloned() {
+            self.mode = Mode::Insert(InsertMode::Edit(snap));
+        }
+    }
+
+    fn insert_action(&mut self, action: InsertAction) {
+        let buf = match self.curr_tab {
+            Tab::Todos => self.todos.get_mut(self.todos_idx).unwrap(),
+            Tab::Dones => self.dones.get_mut(self.dones_idx).unwrap(),
+        };
+        match action {
+            InsertAction::Enter => self.mode = Mode::Normal,
+            InsertAction::Cancel => {
+                match mem::replace(&mut self.mode, Mode::Normal) {
+                    Mode::Insert(InsertMode::Edit(snap)) => *buf = snap,
+                    Mode::Insert(InsertMode::New) => self.delete(),
+                    _ => unreachable!(),
+                };
+            }
+            InsertAction::Char(c) => buf.push(c),
+            InsertAction::DeleteChar => _ = buf.pop(),
+        }
+    }
+
+    fn handle_help_action(&mut self, action: &Action) {
+        match action {
+            Action::SaveQuit | Action::NoSaveQuit => self.mode = Mode::Normal,
+            _ => {}
+        }
+    }
+
+    fn show_help(&mut self) {
+        self.mode = Mode::Help;
+    }
+
+    fn toggle_show_number(&mut self) {
+        self.show_number = !self.show_number;
+    }
+
+    fn get_current_buffer(&self) -> Option<&String> {
+        match self.curr_tab {
+            Tab::Todos => self.todos.get(self.todos_idx),
+            Tab::Dones => self.dones.get(self.dones_idx),
+        }
+    }
+
+    fn goto_list_pos(&mut self, pos: usize) {
+        let idx = match self.curr_tab {
+            Tab::Todos => &mut self.todos_idx,
+            Tab::Dones => &mut self.dones_idx,
+        };
+        *idx = pos;
+    }
+
+    fn clamp_indexes(&mut self) {
+        self.todos_idx = self.todos_idx.clamp(0, self.todos.len().saturating_sub(1));
+        self.dones_idx = self.dones_idx.clamp(0, self.dones.len().saturating_sub(1));
+    }
+}
+
 pub struct App {
     file_path: PathBuf,
     curr_state: AppState,
@@ -96,7 +242,7 @@ impl App {
         let mut term_size = Default::default();
         init_scr()?;
         loop {
-            self.clamp_indexes();
+            self.curr_state.clamp_indexes();
             handle_term_size(&mut term_size)?;
             clear_scr()?;
             goto_begin()?;
@@ -118,12 +264,12 @@ impl App {
                     }
                     Mode::Insert(_) => {
                         if let Ok(action) = InsertAction::try_from(event) {
-                            self.handle_insert_mode(action);
+                            self.curr_state.insert_action(action);
                         }
                     }
                     Mode::Help => {
                         if let Ok(action) = Action::try_from(event) {
-                            self.handle_help_mode(action);
+                            self.curr_state.handle_help_action(&action);
                         }
                     }
                 }
@@ -299,173 +445,36 @@ impl App {
         match action {
             Action::Enter => {
                 self.push_state();
-                self.handle_enter_press();
+                self.curr_state.enter_press();
             }
-            Action::SwitchTab(tab) => match tab {
-                TabAction::Toggle => self.curr_state.curr_tab = self.curr_state.curr_tab.toggle(),
-                TabAction::Left => self.curr_state.curr_tab = Tab::Todos,
-                TabAction::Right => self.curr_state.curr_tab = Tab::Dones,
-            },
+            Action::SwitchTab(tab) => self.curr_state.switch_tab(tab),
             Action::Insert(direction) => {
                 self.push_state();
-                self.start_insert_mode(direction);
+                self.curr_state.start_insert(direction);
             }
             Action::Edit => {
                 self.push_state();
-                self.start_edit_mode();
+                self.curr_state.start_edit();
             }
-            Action::MoveCursor(direction) => self.handle_cursor_move(direction),
+            Action::MoveCursor(direction) => self.curr_state.cursor_move(direction),
             Action::MoveItem(direction) => {
                 self.push_state();
-                self.handle_move_item(direction);
+                self.curr_state.move_item(direction);
             }
-            Action::GotoBegin => self.goto_list_pos(0),
-            Action::GotoEnd => self.goto_list_pos(usize::MAX),
+            Action::GotoBegin => self.curr_state.goto_list_pos(0),
+            Action::GotoEnd => self.curr_state.goto_list_pos(usize::MAX),
             Action::Delete => {
                 self.push_state();
-                self.handle_delete();
+                self.curr_state.delete();
             }
             Action::SaveQuit => anyhow::bail!(globals::BREAK),
             Action::NoSaveQuit => anyhow::bail!(globals::NO_SAVE),
-            Action::ShowHelp => self.curr_state.mode = Mode::Help,
-            Action::ShowNumber => self.curr_state.show_number = !self.curr_state.show_number,
+            Action::ShowHelp => self.curr_state.show_help(),
+            Action::ShowNumber => self.curr_state.toggle_show_number(),
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
         }
-
         Ok(())
-    }
-
-    fn handle_enter_press(&mut self) {
-        match self.curr_state.curr_tab {
-            Tab::Todos => {
-                if self.curr_state.todos.is_empty() {
-                    return;
-                }
-                let value = self.curr_state.todos.remove(self.curr_state.todos_idx);
-                self.curr_state.dones.push(value);
-            }
-            Tab::Dones => {
-                if self.curr_state.dones.is_empty() {
-                    return;
-                }
-                let value = self.curr_state.dones.remove(self.curr_state.dones_idx);
-                self.curr_state.todos.push(value);
-            }
-        }
-    }
-
-    fn handle_cursor_move(&mut self, direction: KeyCode) {
-        let idx = match self.curr_state.curr_tab {
-            Tab::Todos => &mut self.curr_state.todos_idx,
-            Tab::Dones => &mut self.curr_state.dones_idx,
-        };
-        match direction {
-            KeyCode::Down => *idx += 1,
-            KeyCode::Up => *idx = idx.saturating_sub(1),
-            _ => unreachable!("This spot should't be reachable"),
-        };
-    }
-
-    fn handle_delete(&mut self) {
-        let (target_vec, idx) = match self.curr_state.curr_tab {
-            Tab::Todos => (&mut self.curr_state.todos, &self.curr_state.todos_idx),
-            Tab::Dones => (&mut self.curr_state.dones, &self.curr_state.dones_idx),
-        };
-
-        if target_vec.is_empty() {
-            return;
-        }
-
-        target_vec.remove(*idx);
-    }
-
-    fn handle_move_item(&mut self, direction: KeyCode) {
-        let (vec, idx) = match self.curr_state.curr_tab {
-            Tab::Todos => (&mut self.curr_state.todos, &mut self.curr_state.todos_idx),
-            Tab::Dones => (&mut self.curr_state.dones, &mut self.curr_state.dones_idx),
-        };
-
-        if vec.is_empty() {
-            return;
-        }
-
-        let idx_val = *idx;
-
-        let new_idx = match direction {
-            KeyCode::Down => (idx_val + 1).min(vec.len() - 1),
-            KeyCode::Up => idx_val.saturating_sub(1),
-            _ => unreachable!(),
-        };
-
-        vec.swap(idx_val, new_idx);
-        *idx = new_idx;
-    }
-
-    fn handle_help_mode(&mut self, action: Action) {
-        match action {
-            Action::SaveQuit | Action::NoSaveQuit => self.curr_state.mode = Mode::Normal,
-            _ => {}
-        }
-    }
-
-    fn handle_insert_mode(&mut self, code: InsertAction) {
-        let buf = match self.curr_state.curr_tab {
-            Tab::Todos => self
-                .curr_state
-                .todos
-                .get_mut(self.curr_state.todos_idx)
-                .unwrap(),
-            Tab::Dones => self
-                .curr_state
-                .dones
-                .get_mut(self.curr_state.dones_idx)
-                .unwrap(),
-        };
-
-        match code {
-            InsertAction::Enter => self.disable_insert_mode(),
-            InsertAction::Cancel => {
-                match mem::replace(&mut self.curr_state.mode, Mode::Normal) {
-                    Mode::Insert(InsertMode::Edit(snap)) => *buf = snap,
-                    Mode::Insert(InsertMode::New) => self.handle_delete(),
-                    _ => unreachable!(),
-                };
-                self.disable_insert_mode();
-            }
-            InsertAction::Char(c) => buf.push(c),
-            InsertAction::DeleteChar => _ = buf.pop(),
-        }
-    }
-
-    fn start_insert_mode(&mut self, direction: KeyCode) {
-        self.curr_state.mode = Mode::Insert(InsertMode::New);
-
-        let (list, idx) = match self.curr_state.curr_tab {
-            Tab::Todos => (&mut self.curr_state.todos, &mut self.curr_state.todos_idx),
-            Tab::Dones => (&mut self.curr_state.dones, &mut self.curr_state.dones_idx),
-        };
-
-        let insert_idx = match direction {
-            KeyCode::Up => *idx,
-            KeyCode::Down => *idx + 1,
-            _ => unreachable!(),
-        }
-        .clamp(0, list.len());
-
-        list.insert(insert_idx, String::new());
-        *idx = insert_idx;
-    }
-
-    fn start_edit_mode(&mut self) {
-        let Some(snap) = self.get_current_buffer().cloned() else {
-            return;
-        };
-        self.curr_state.mode = Mode::Insert(InsertMode::Edit(snap))
-    }
-
-    fn disable_insert_mode(&mut self) {
-        self.curr_state.mode = Mode::Normal;
     }
 }
 
@@ -488,32 +497,5 @@ impl App {
             self.undo_stack
                 .push(mem::replace(&mut self.curr_state, state));
         }
-    }
-
-    fn get_current_buffer(&self) -> Option<&String> {
-        match self.curr_state.curr_tab {
-            Tab::Todos => self.curr_state.todos.get(self.curr_state.todos_idx),
-            Tab::Dones => self.curr_state.dones.get(self.curr_state.dones_idx),
-        }
-    }
-
-    fn goto_list_pos(&mut self, pos: usize) {
-        let idx = match self.curr_state.curr_tab {
-            Tab::Todos => &mut self.curr_state.todos_idx,
-            Tab::Dones => &mut self.curr_state.dones_idx,
-        };
-
-        *idx = pos;
-    }
-
-    fn clamp_indexes(&mut self) {
-        self.curr_state.todos_idx = self
-            .curr_state
-            .todos_idx
-            .clamp(0, self.curr_state.todos.len().saturating_sub(1));
-        self.curr_state.dones_idx = self
-            .curr_state
-            .dones_idx
-            .clamp(0, self.curr_state.dones.len().saturating_sub(1));
     }
 }
