@@ -513,3 +513,386 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(todos: &[&str], dones: &[&str]) -> AppState {
+        AppState {
+            todos: todos.iter().map(|s| s.to_string()).collect(),
+            dones: dones.iter().map(|s| s.to_string()).collect(),
+            todos_idx: 0,
+            dones_idx: 0,
+            curr_tab: Tab::Todos,
+            show_number: false,
+            mode: Mode::Normal,
+        }
+    }
+
+    #[test]
+    fn test_enter_press_moves_todo_to_done() {
+        let mut s = state(&["task1", "task2"], &[]);
+        s.enter_press();
+        assert_eq!(s.todos, vec!["task2"]);
+        assert_eq!(s.dones, vec!["task1"]);
+    }
+
+    #[test]
+    fn test_enter_press_moves_done_to_todo() {
+        let mut s = state(&[], &["done1", "done2"]);
+        s.curr_tab = Tab::Dones;
+        s.enter_press();
+        assert_eq!(s.dones, vec!["done2"]);
+        assert_eq!(s.todos, vec!["done1"]);
+    }
+
+    #[test]
+    fn test_enter_press_empty_todos() {
+        let mut s = state(&[], &["done1"]);
+        s.enter_press();
+        assert!(s.todos.is_empty());
+        assert_eq!(s.dones, vec!["done1"]);
+    }
+
+    #[test]
+    fn test_enter_press_empty_dones() {
+        let mut s = state(&["task1"], &[]);
+        s.curr_tab = Tab::Dones;
+        s.enter_press();
+        assert!(s.dones.is_empty());
+        assert_eq!(s.todos, vec!["task1"]);
+    }
+
+    #[test]
+    fn test_switch_tab_toggle() {
+        let mut s = state(&[], &[]);
+        assert!(matches!(s.curr_tab, Tab::Todos));
+        s.switch_tab(TabAction::Toggle);
+        assert!(matches!(s.curr_tab, Tab::Dones));
+        s.switch_tab(TabAction::Toggle);
+        assert!(matches!(s.curr_tab, Tab::Todos));
+    }
+
+    #[test]
+    fn test_switch_tab_left_right() {
+        let mut s = state(&[], &[]);
+        s.switch_tab(TabAction::Right);
+        assert!(matches!(s.curr_tab, Tab::Dones));
+        s.switch_tab(TabAction::Left);
+        assert!(matches!(s.curr_tab, Tab::Todos));
+    }
+
+    #[test]
+    fn test_cursor_move_down_in_todos() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.cursor_move(KeyCode::Down);
+        assert_eq!(s.todos_idx, 1);
+        s.cursor_move(KeyCode::Down);
+        assert_eq!(s.todos_idx, 2);
+    }
+
+    #[test]
+    fn test_cursor_move_up_in_todos() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.todos_idx = 2;
+        s.cursor_move(KeyCode::Up);
+        assert_eq!(s.todos_idx, 1);
+    }
+
+    #[test]
+    fn test_cursor_move_up_at_zero_stays_zero() {
+        let mut s = state(&["a", "b"], &[]);
+        s.cursor_move(KeyCode::Up);
+        assert_eq!(s.todos_idx, 0);
+    }
+
+    #[test]
+    fn test_cursor_move_down_in_dones() {
+        let mut s = state(&[], &["x", "y"]);
+        s.curr_tab = Tab::Dones;
+        s.cursor_move(KeyCode::Down);
+        assert_eq!(s.dones_idx, 1);
+    }
+
+    #[test]
+    fn test_delete_removes_from_todos() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.delete();
+        assert_eq!(s.todos, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn test_delete_removes_from_dones() {
+        let mut s = state(&[], &["x", "y"]);
+        s.curr_tab = Tab::Dones;
+        s.delete();
+        assert_eq!(s.dones, vec!["y"]);
+    }
+
+    #[test]
+    fn test_delete_empty_list() {
+        let mut s = state(&[], &[]);
+        s.delete();
+        assert!(s.todos.is_empty());
+    }
+
+    #[test]
+    fn test_delete_respects_index() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.todos_idx = 1;
+        s.delete();
+        assert_eq!(s.todos, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn test_move_item_down_swaps_in_todos() {
+        let mut s = state(&["a", "b"], &[]);
+        s.move_item(KeyCode::Down);
+        assert_eq!(s.todos, vec!["b", "a"]);
+        assert_eq!(s.todos_idx, 1);
+    }
+
+    #[test]
+    fn test_move_item_up_swaps_in_todos() {
+        let mut s = state(&["a", "b"], &[]);
+        s.todos_idx = 1;
+        s.move_item(KeyCode::Up);
+        assert_eq!(s.todos, vec!["b", "a"]);
+        assert_eq!(s.todos_idx, 0);
+    }
+
+    #[test]
+    fn test_move_item_down_at_bottom_stays() {
+        let mut s = state(&["a", "b"], &[]);
+        s.todos_idx = 1;
+        s.move_item(KeyCode::Down);
+        assert_eq!(s.todos, vec!["a", "b"]);
+        assert_eq!(s.todos_idx, 1);
+    }
+
+    #[test]
+    fn test_move_item_up_at_top_stays() {
+        let mut s = state(&["a", "b"], &[]);
+        s.move_item(KeyCode::Up);
+        assert_eq!(s.todos, vec!["a", "b"]);
+        assert_eq!(s.todos_idx, 0);
+    }
+
+    #[test]
+    fn test_move_item_empty_list() {
+        let mut s = state(&[], &[]);
+        s.move_item(KeyCode::Down);
+        assert!(s.todos.is_empty());
+    }
+
+    #[test]
+    fn test_start_insert_above_current() {
+        let mut s = state(&["b", "c"], &[]);
+        s.start_insert(KeyCode::Up);
+        assert_eq!(s.todos, vec!["", "b", "c"]);
+        assert_eq!(s.todos_idx, 0);
+        assert!(matches!(s.mode, Mode::Insert(InsertMode::New)));
+    }
+
+    #[test]
+    fn test_start_insert_below_current() {
+        let mut s = state(&["a", "c"], &[]);
+        s.start_insert(KeyCode::Down);
+        assert_eq!(s.todos, vec!["a", "", "c"]);
+        assert_eq!(s.todos_idx, 1);
+        assert!(matches!(s.mode, Mode::Insert(InsertMode::New)));
+    }
+
+    #[test]
+    fn test_start_insert_at_end() {
+        let mut s = state(&["a"], &[]);
+        s.todos_idx = 0;
+        s.start_insert(KeyCode::Down);
+        assert_eq!(s.todos, vec!["a", ""]);
+        assert_eq!(s.todos_idx, 1);
+    }
+
+    #[test]
+    fn test_insert_action_enter_saves() {
+        let mut s = state(&["hi"], &[]);
+        s.mode = Mode::Insert(InsertMode::New);
+        s.insert_action(InsertAction::Enter);
+        assert!(matches!(s.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_insert_action_cancel_new_removes_item() {
+        let mut s = state(&["a", "b"], &[]);
+        s.mode = Mode::Insert(InsertMode::New);
+        s.insert_action(InsertAction::Cancel);
+        assert_eq!(s.todos, vec!["b"]);
+        assert!(matches!(s.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_insert_action_cancel_edit_restores_snapshot() {
+        let mut s = state(&["original"], &[]);
+        s.mode = Mode::Insert(InsertMode::Edit("original".into()));
+        // Simulate typing in insert mode
+        let buf = s.todos.get_mut(0).unwrap();
+        buf.push_str("+edited");
+        assert_eq!(s.todos[0], "original+edited");
+        // Cancel should restore
+        s.insert_action(InsertAction::Cancel);
+        assert_eq!(s.todos[0], "original");
+        assert!(matches!(s.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_insert_action_char_appends() {
+        let mut s = state(&["he"], &[]);
+        s.mode = Mode::Insert(InsertMode::New);
+        s.insert_action(InsertAction::Char('l'));
+        s.insert_action(InsertAction::Char('l'));
+        s.insert_action(InsertAction::Char('o'));
+        assert_eq!(s.todos[0], "hello");
+    }
+
+    #[test]
+    fn test_insert_action_delete_char_removes() {
+        let mut s = state(&["hello"], &[]);
+        s.mode = Mode::Insert(InsertMode::New);
+        s.insert_action(InsertAction::DeleteChar);
+        assert_eq!(s.todos[0], "hell");
+    }
+
+    #[test]
+    fn test_start_edit_sets_edit_mode() {
+        let mut s = state(&["editable"], &[]);
+        s.start_edit();
+        assert!(matches!(s.mode, Mode::Insert(InsertMode::Edit(_))));
+    }
+
+    #[test]
+    fn test_start_edit_empty_list_does_nothing() {
+        let mut s = state(&[], &[]);
+        s.start_edit();
+        assert!(matches!(s.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_start_edit_captures_snapshot() {
+        let mut s = state(&["hello"], &[]);
+        s.start_edit();
+        if let Mode::Insert(InsertMode::Edit(snap)) = &s.mode {
+            assert_eq!(snap, "hello");
+        } else {
+            panic!("expected Edit mode");
+        }
+    }
+
+    #[test]
+    fn test_show_help_sets_help_mode() {
+        let mut s = state(&[], &[]);
+        s.show_help();
+        assert!(matches!(s.mode, Mode::Help));
+    }
+
+    #[test]
+    fn test_toggle_show_number() {
+        let mut s = state(&[], &[]);
+        assert!(!s.show_number);
+        s.toggle_show_number();
+        assert!(s.show_number);
+        s.toggle_show_number();
+        assert!(!s.show_number);
+    }
+
+    #[test]
+    fn test_handle_help_action_exits_with_q() {
+        let mut s = state(&[], &[]);
+        s.mode = Mode::Help;
+        s.handle_help_action(&Action::SaveQuit);
+        assert!(matches!(s.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_handle_help_action_exits_with_big_q() {
+        let mut s = state(&[], &[]);
+        s.mode = Mode::Help;
+        s.handle_help_action(&Action::NoSaveQuit);
+        assert!(matches!(s.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_handle_help_action_ignores_other() {
+        let mut s = state(&[], &[]);
+        s.mode = Mode::Help;
+        s.handle_help_action(&Action::Enter);
+        assert!(matches!(s.mode, Mode::Help));
+    }
+
+    #[test]
+    fn test_get_current_buffer_returns_selected_item() {
+        let s = state(&["first", "second"], &[]);
+        assert_eq!(s.get_current_buffer().map(String::as_str), Some("first"));
+    }
+
+    #[test]
+    fn test_get_current_buffer_out_of_bounds() {
+        let mut s = state(&[], &[]);
+        s.todos_idx = 0;
+        assert!(s.get_current_buffer().is_none());
+    }
+
+    #[test]
+    fn test_goto_list_pos_sets_index() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.goto_list_pos(2);
+        assert_eq!(s.todos_idx, 2);
+    }
+
+    #[test]
+    fn test_goto_end_sets_max() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.goto_list_pos(usize::MAX);
+        assert_eq!(s.todos_idx, usize::MAX);
+    }
+
+    #[test]
+    fn test_goto_list_pos_in_dones_tab() {
+        let mut s = state(&[], &["x", "y", "z"]);
+        s.curr_tab = Tab::Dones;
+        s.goto_list_pos(1);
+        assert_eq!(s.dones_idx, 1);
+    }
+
+    #[test]
+    fn test_clamp_indexes_brings_out_of_bounds_down() {
+        let mut s = state(&["a", "b"], &[]);
+        s.todos_idx = 5;
+        s.clamp_indexes();
+        assert_eq!(s.todos_idx, 1);
+    }
+
+    #[test]
+    fn test_clamp_indexes_empty_list_sets_zero() {
+        let mut s = state(&[], &[]);
+        s.todos_idx = 0;
+        s.clamp_indexes();
+        assert_eq!(s.todos_idx, 0);
+    }
+
+    #[test]
+    fn test_clamp_indexes_dones() {
+        let mut s = state(&[], &["x"]);
+        s.curr_tab = Tab::Dones;
+        s.dones_idx = 10;
+        s.clamp_indexes();
+        assert_eq!(s.dones_idx, 0);
+    }
+
+    #[test]
+    fn test_clamp_indexes_valid_index_unchanged() {
+        let mut s = state(&["a", "b", "c"], &[]);
+        s.todos_idx = 1;
+        s.clamp_indexes();
+        assert_eq!(s.todos_idx, 1);
+    }
+}

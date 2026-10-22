@@ -1,6 +1,6 @@
 [package]
 name = "tick"
-version = "1.10.4"
+version = "1.10.5"
 edition = "2024"
 
 [dependencies]
