@@ -202,6 +202,7 @@ pub struct App {
     curr_state: AppState,
     undo_stack: Vec<AppState>,
     redo_stack: Vec<AppState>,
+    fullscreen: bool,
 }
 
 /// Constructor / Entry Point
@@ -224,6 +225,7 @@ impl App {
             },
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            fullscreen: false,
         };
         Ok(s)
     }
@@ -264,11 +266,20 @@ impl App {
             self.write_status(term_size)?;
 
             let mid_scr = term_size.0 / 2;
-            match self.curr_state.curr_tab {
-                Tab::Todos => goto(0, self.curr_state.todos_idx as u16 + 1)?,
-                Tab::Dones => goto(mid_scr, self.curr_state.dones_idx as u16 + 1)?,
-            }
+            let col = if self.fullscreen {
+                0
+            } else {
+                match self.curr_state.curr_tab {
+                    Tab::Todos => 0,
+                    Tab::Dones => mid_scr,
+                }
+            };
+            let row = match self.curr_state.curr_tab {
+                Tab::Todos => self.curr_state.todos_idx,
+                Tab::Dones => self.curr_state.dones_idx,
+            } as u16;
 
+            goto(col, row + 1)?;
             if let Some(event) = get_key_event(Duration::from_millis(1000 / 60))? {
                 match self.curr_state.mode {
                     Mode::Normal => {
@@ -305,6 +316,10 @@ impl App {
         let col_mid = term_size.0 / 2;
         let is_tab_todo = matches!(self.curr_state.curr_tab, Tab::Todos);
 
+        if self.fullscreen {
+            let title = if is_tab_todo { "TODO\r\n" } else { "DONE\r\n" };
+            return write_text(title, true);
+        }
         write_text("TODO", is_tab_todo)?;
         write_text(&" ".repeat(col_mid as usize - 4), false)?;
         write_text("DONE\r\n", !is_tab_todo)?;
@@ -343,6 +358,7 @@ impl App {
                 "ACTIONS",
                 &[
                     ("f1", "Show this screen"),
+                    ("f", "Toggle fullscreen"),
                     ("i / o", "Insert item above / below"),
                     ("e", "Edit item under cursor"),
                     ("J / K", "Move item under cursor down / up"),
@@ -399,7 +415,8 @@ impl App {
                           line_begin: &str,
                           is_active_tab: bool,
                           selected_idx: usize,
-                          col_offset: u16|
+                          col_offset: u16,
+                          max_width: usize|
          -> io::Result<()> {
             let mut current_line = 1;
             for (idx, item) in items.iter().enumerate() {
@@ -415,11 +432,7 @@ impl App {
 
                 let full_line = format!("{} {}", line_label, item);
                 let offset = line_begin.width() + 1;
-                let (first_line, rest_lines) = split_to_fit(
-                    &full_line,
-                    col_mid as usize - if col_offset > 0 { 0 } else { 1 },
-                    offset,
-                );
+                let (first_line, rest_lines) = split_to_fit(&full_line, max_width, offset);
 
                 goto(col_offset, current_line)?;
                 write_text(first_line, should_highlight)?;
@@ -435,20 +448,46 @@ impl App {
             Ok(())
         };
 
-        draw_items(
-            &self.curr_state.todos,
-            globals::TODO_INDICATOR,
-            matches!(self.curr_state.curr_tab, Tab::Todos),
-            self.curr_state.todos_idx,
-            0,
-        )?;
-        draw_items(
-            &self.curr_state.dones,
-            globals::DONE_INDICATOR,
-            matches!(self.curr_state.curr_tab, Tab::Dones),
-            self.curr_state.dones_idx,
-            col_mid,
-        )?;
+        if self.fullscreen {
+            let full_width = (cols as usize).saturating_sub(1);
+            match self.curr_state.curr_tab {
+                Tab::Todos => draw_items(
+                    &self.curr_state.todos,
+                    globals::TODO_INDICATOR,
+                    true,
+                    self.curr_state.todos_idx,
+                    0,
+                    full_width,
+                )?,
+                Tab::Dones => draw_items(
+                    &self.curr_state.dones,
+                    globals::DONE_INDICATOR,
+                    true,
+                    self.curr_state.dones_idx,
+                    0,
+                    full_width,
+                )?,
+            }
+        } else {
+            let left_width = (col_mid as usize).saturating_sub(1);
+            let right_width = (cols - col_mid) as usize;
+            draw_items(
+                &self.curr_state.todos,
+                globals::TODO_INDICATOR,
+                matches!(self.curr_state.curr_tab, Tab::Todos),
+                self.curr_state.todos_idx,
+                0,
+                left_width,
+            )?;
+            draw_items(
+                &self.curr_state.dones,
+                globals::DONE_INDICATOR,
+                matches!(self.curr_state.curr_tab, Tab::Dones),
+                self.curr_state.dones_idx,
+                col_mid,
+                right_width,
+            )?;
+        }
         Ok(())
     }
 }
@@ -487,6 +526,7 @@ impl App {
             Action::ShowNumber => self.curr_state.toggle_show_number(),
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
+            Action::ToggleFullscreen => self.fullscreen = !self.fullscreen,
         }
         Ok(())
     }

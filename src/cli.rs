@@ -21,8 +21,7 @@ impl Args {
     pub fn path(&self) -> anyhow::Result<PathBuf> {
         let mut path = match self.path {
             Some(ref p) => p.clone(),
-            None => home_dir()
-            .context("Unable to find home directory")?
+            None => home_dir().context("Unable to find home directory")?,
         };
 
         if path.is_dir() {

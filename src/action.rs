@@ -22,6 +22,7 @@ pub enum Action {
     ShowNumber,
     Undo,
     Redo,
+    ToggleFullscreen,
 }
 
 impl TryFrom<KeyEvent> for Action {
@@ -83,6 +84,9 @@ impl TryFrom<KeyEvent> for Action {
             Char('q') => Self::SaveQuit,
             Char('Q') => Self::NoSaveQuit,
             Char('c') if m.contains(M::CONTROL) => Self::NoSaveQuit,
+
+            // ── Toggle Fullscreen ──────────────────────────────
+            Char('f') => Self::ToggleFullscreen,
 
             // ── Fallback ───────────────────────────────────
             _ => return Err(()),
