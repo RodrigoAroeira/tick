@@ -1,8 +1,8 @@
+use std::path::PathBuf;
+
 use anyhow::Context;
 use clap::Parser;
 use dirs::home_dir;
-
-use std::path::PathBuf;
 
 /// A simple todo list app based on tsoding's todo-rs
 ///

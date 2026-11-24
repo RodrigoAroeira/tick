@@ -5,15 +5,14 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::KeyCode;
+use crossterm::event::{self, Event, KeyCode};
 use unicode_width::UnicodeWidthStr;
 
 use crate::action::{Action, InsertAction, TabAction};
-use crate::helpers::{
-    clear_scr, get_key_event, get_todos_dones, goto, goto_begin, handle_term_size, init_scr,
-    save_to_file, split_to_fit, write_text,
-};
-use crate::{globals, screen_guard::ScreenGuard, tab::Tab};
+use crate::globals;
+use crate::helpers;
+use crate::render::Renderer;
+use crate::tab::Tab;
 
 #[derive(Clone)]
 pub(crate) enum InsertMode {
@@ -211,7 +210,7 @@ impl App {
     where
         P: AsRef<Path>,
     {
-        let (todos, dones) = get_todos_dones(&file_path)?;
+        let (todos, dones) = helpers::get_todos_dones(&file_path)?;
         let s = Self {
             file_path: file_path.as_ref().to_path_buf(),
             curr_state: AppState {
@@ -235,13 +234,13 @@ impl App {
             Err(AppSignal::NoSave) => return Ok(()),
             Err(AppSignal::SaveAndQuit) | Ok(()) => {}
             Err(AppSignal::TerminalError(e)) => {
-                let _ = writeln!(io::stderr(), "Terminal error: {e}");
+                _ = writeln!(io::stderr(), "Terminal error: {e}");
                 return Err(e.into());
             }
         }
 
         if !self.undo_stack.is_empty() {
-            save_to_file(
+            helpers::save_to_file(
                 &self.file_path,
                 &self.curr_state.todos,
                 &self.curr_state.dones,
@@ -254,34 +253,18 @@ impl App {
 /// Main loop / Screen Drawing
 impl App {
     fn main_loop(&mut self) -> Result<(), AppSignal> {
-        let _guard = ScreenGuard {};
-        let mut term_size = Default::default();
-        init_scr()?;
+        let mut r = Renderer::new()?;
         loop {
             self.curr_state.clamp_indexes();
-            handle_term_size(&mut term_size)?;
-            clear_scr()?;
-            goto_begin()?;
-            self.write_screen(term_size)?;
-            self.write_status(term_size)?;
+            r.clear()?;
+            self.write_screen(&mut r)?;
+            r.present()?;
 
-            let mid_scr = term_size.0 / 2;
-            let col = if self.fullscreen {
-                0
-            } else {
-                match self.curr_state.curr_tab {
-                    Tab::Todos => 0,
-                    Tab::Dones => mid_scr,
-                }
-            };
-            let row = match self.curr_state.curr_tab {
-                Tab::Todos => self.curr_state.todos_idx,
-                Tab::Dones => self.curr_state.dones_idx,
-            } as u16;
-
-            goto(col, row + 1)?;
-            if let Some(event) = get_key_event(Duration::from_millis(1000 / 60))? {
-                match self.curr_state.mode {
+            if !event::poll(Duration::from_millis(1000 / 60))? {
+                continue;
+            }
+            match event::read()? {
+                Event::Key(event) => match self.curr_state.mode {
                     Mode::Normal => {
                         if let Ok(action) = Action::try_from(event) {
                             self.execute_action(action)?;
@@ -289,7 +272,7 @@ impl App {
                     }
                     Mode::Insert(_) => {
                         if let Ok(action) = InsertAction::try_from(event) {
-                            self.curr_state.insert_action(action);
+                            self.curr_state.insert_action(action)
                         }
                     }
                     Mode::Help => {
@@ -297,38 +280,39 @@ impl App {
                             self.curr_state.handle_help_action(&action);
                         }
                     }
-                }
+                },
+                Event::Resize(x, y) => r.set_size((x, y)),
+                _ => {}
             }
         }
     }
 
-    fn write_screen(&self, term_size: (u16, u16)) -> io::Result<()> {
+    fn write_screen(&self, r: &mut Renderer) -> io::Result<()> {
+        let term_size = r.size();
         if matches!(self.curr_state.mode, Mode::Help) {
-            self.write_help_screen(term_size)?;
+            self.write_help_screen(r, term_size)?;
         } else {
-            self.write_header(term_size)?;
-            self.write_todos_dones(term_size)?;
+            self.write_header(r, term_size)?;
+            self.write_todos_dones(r, term_size)?;
         }
+        self.write_status(r, term_size)?;
         Ok(())
     }
 
-    fn write_header(&self, term_size: (u16, u16)) -> io::Result<()> {
+    fn write_header(&self, r: &mut Renderer, term_size: (u16, u16)) -> io::Result<()> {
         let col_mid = term_size.0 / 2;
         let is_tab_todo = matches!(self.curr_state.curr_tab, Tab::Todos);
 
         if self.fullscreen {
-            let title = if is_tab_todo { "TODO\r\n" } else { "DONE\r\n" };
-            return write_text(title, true);
+            let title = if is_tab_todo { "TODO" } else { "DONE" };
+            return r.text((0, 0), title, true);
         }
-        write_text("TODO", is_tab_todo)?;
-        write_text(&" ".repeat(col_mid as usize - 4), false)?;
-        write_text("DONE\r\n", !is_tab_todo)?;
+        r.text((0, 0), "TODO", is_tab_todo)?;
+        r.text((col_mid, 0), "DONE", !is_tab_todo)?;
         Ok(())
     }
 
-    fn write_status(&self, term_size: (u16, u16)) -> io::Result<()> {
-        let (_cols, rows) = term_size;
-        goto(0, rows - 1)?;
+    fn write_status(&self, r: &mut Renderer, term_size: (u16, u16)) -> io::Result<()> {
         let txt = match self.curr_state.mode {
             Mode::Normal => "NORMAL",
             Mode::Insert(InsertMode::New) => "INSERT",
@@ -336,23 +320,12 @@ impl App {
             Mode::Help => "HELP",
         };
 
-        write_text(txt, true)
+        r.text((0, term_size.1 - 1), txt, true)
     }
 
-    fn write_help_screen(&self, term_size: (u16, u16)) -> io::Result<()> {
-        let (cols, _) = term_size;
-
-        let println = |s: &str| -> io::Result<()> {
-            write_text(s, false)?;
-            write_text("\r\n", false)?;
-            Ok(())
-        };
-
-        println(&"=".repeat(cols as usize))?;
-        println("HELP")?;
-        println(&"=".repeat(cols as usize))?;
-        println("")?;
-
+    fn help_lines(cols: usize) -> Vec<String> {
+        let sep = "=".repeat(cols);
+        let mut lines = vec![sep.clone(), "HELP".into(), sep.clone(), String::new()];
         let sections: &[(&str, &[(&str, &str)])] = &[
             (
                 "ACTIONS",
@@ -387,31 +360,45 @@ impl App {
             ),
             ("LEAVING HELP", &[("q / Q", "Quit help screen")]),
         ];
-
         let max_key_len = sections
             .iter()
             .flat_map(|(_, lines)| lines.iter().map(|(k, _)| k.len()))
             .max()
             .unwrap_or(0);
 
-        for (title, lines) in sections.iter() {
-            println(title)?;
-            for (key, desc) in lines.iter() {
+        for (title, rows) in sections.iter() {
+            lines.push((*title).into());
+            for (key, desc) in rows.iter() {
                 let padded = format!("{:width$}", key, width = max_key_len);
-                println(&format!("  {}  - {}", padded, desc))?;
+                lines.push(format!("  {}  - {}", padded, desc));
             }
-            println("")?;
+            lines.push(String::new());
+        }
+        lines.push(sep);
+        lines
+    }
+
+    fn write_help_screen(&self, r: &mut Renderer, term_size: (u16, u16)) -> io::Result<()> {
+        let last_row = term_size.1 - 1;
+
+        for (row, line) in Self::help_lines(term_size.0 as usize).iter().enumerate() {
+            let row = row as u16;
+            if row >= last_row {
+                break;
+            }
+            r.text((0, row), line, false)?;
         }
 
-        println(&"=".repeat(cols as usize))?;
         Ok(())
     }
 
-    fn write_todos_dones(&self, term_size: (u16, u16)) -> io::Result<()> {
-        let (cols, _) = term_size;
+    fn write_todos_dones(&self, r: &mut Renderer, term_size: (u16, u16)) -> io::Result<()> {
+        let (cols, rows) = term_size;
         let col_mid = cols / 2;
+        let last_row = rows - 1;
 
-        let draw_items = |items: &[String],
+        let draw_items = |r: &mut Renderer,
+                          items: &[String],
                           line_begin: &str,
                           is_active_tab: bool,
                           selected_idx: usize,
@@ -420,6 +407,9 @@ impl App {
          -> io::Result<()> {
             let mut current_line = 1;
             for (idx, item) in items.iter().enumerate() {
+                if current_line >= last_row {
+                    break;
+                }
                 let should_highlight = is_active_tab && idx == selected_idx;
 
                 let num_width = items.len().to_string().len();
@@ -432,16 +422,21 @@ impl App {
 
                 let full_line = format!("{} {}", line_label, item);
                 let offset = line_begin.width() + 1;
-                let (first_line, rest_lines) = split_to_fit(&full_line, max_width, offset);
+                let (first_line, rest_lines) = helpers::split_to_fit(&full_line, max_width, offset);
 
-                goto(col_offset, current_line)?;
-                write_text(first_line, should_highlight)?;
+                r.text((col_offset, current_line), first_line, should_highlight)?;
                 current_line += 1;
 
                 let padding = " ".repeat(line_begin.width() + 1);
                 for line in rest_lines {
-                    goto(col_offset, current_line)?;
-                    write_text(&format!("{}{}", padding, line), should_highlight)?;
+                    if current_line >= last_row {
+                        break;
+                    }
+                    r.text(
+                        (col_offset, current_line),
+                        &format!("{}{}", padding, line),
+                        should_highlight,
+                    )?;
                     current_line += 1;
                 }
             }
@@ -452,6 +447,7 @@ impl App {
             let full_width = (cols as usize).saturating_sub(1);
             match self.curr_state.curr_tab {
                 Tab::Todos => draw_items(
+                    r,
                     &self.curr_state.todos,
                     globals::TODO_INDICATOR,
                     true,
@@ -460,6 +456,7 @@ impl App {
                     full_width,
                 )?,
                 Tab::Dones => draw_items(
+                    r,
                     &self.curr_state.dones,
                     globals::DONE_INDICATOR,
                     true,
@@ -472,6 +469,7 @@ impl App {
             let left_width = (col_mid as usize).saturating_sub(1);
             let right_width = (cols - col_mid) as usize;
             draw_items(
+                r,
                 &self.curr_state.todos,
                 globals::TODO_INDICATOR,
                 matches!(self.curr_state.curr_tab, Tab::Todos),
@@ -480,6 +478,7 @@ impl App {
                 left_width,
             )?;
             draw_items(
+                r,
                 &self.curr_state.dones,
                 globals::DONE_INDICATOR,
                 matches!(self.curr_state.curr_tab, Tab::Dones),

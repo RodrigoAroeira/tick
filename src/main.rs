@@ -1,13 +1,13 @@
-use crate::app::App;
-
 use clap::Parser;
+
+use crate::app::App;
 
 mod action;
 mod app;
 mod cli;
 mod globals;
 mod helpers;
-mod screen_guard;
+mod render;
 mod tab;
 
 fn main() -> anyhow::Result<()> {
