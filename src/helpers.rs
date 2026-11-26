@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use std::path::Path;
 
 use anyhow::Result;
@@ -91,32 +91,4 @@ fn split_remainder(s: &str, max_width: usize, offset: usize) -> Vec<&str> {
     }
 
     result
-}
-
-pub fn save_to_file<P>(path: P, todos: &[String], dones: &[String]) -> io::Result<()>
-where
-    P: AsRef<Path>,
-{
-    let path = path.as_ref();
-    if todos.is_empty() && dones.is_empty() && !path.exists() {
-        return Ok(());
-    }
-
-    let tmp_path = path.with_extension("tmp");
-    let mut tmp_file = File::create(&tmp_path)?;
-    let mut write_to_file = |strs: &[String], str_begin: &str| -> io::Result<()> {
-        for s in strs {
-            writeln!(tmp_file, "{}{}", str_begin, s)?;
-        }
-        Ok(())
-    };
-
-    write_to_file(todos, globals::TODO_PREFIX)?;
-    write_to_file(dones, globals::DONE_PREFIX)?;
-
-    tmp_file.flush()?;
-    std::fs::rename(tmp_path, path)?;
-    println!("Saved state to {}", path.display());
-
-    Ok(())
 }

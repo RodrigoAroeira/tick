@@ -16,6 +16,7 @@ pub enum Action {
     GotoBegin,
     GotoEnd,
     Delete,
+    Save,
     SaveQuit,
     NoSaveQuit,
     ShowHelp,
@@ -46,6 +47,7 @@ impl TryFrom<KeyEvent> for Action {
             Left if !m.contains(M::SHIFT) => Self::SwitchTab(TA::Left),
             Char('n') => Self::ShowNumber,
             Char('f') => Self::ToggleFullscreen,
+            Char('s') => Self::Save,
 
             // ── Insert / Edit ───────────────────────────────
             Char('i') => Self::Insert(Up),

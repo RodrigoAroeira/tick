@@ -1,4 +1,5 @@
 use std::{
+    fs::File,
     io::{self, Write},
     mem,
     path::{Path, PathBuf},
@@ -240,11 +241,8 @@ impl App {
         }
 
         if !self.undo_stack.is_empty() {
-            helpers::save_to_file(
-                &self.file_path,
-                &self.curr_state.todos,
-                &self.curr_state.dones,
-            )?;
+            self.save()?;
+            println!("Saved state to {}", self.file_path.display());
         }
         Ok(())
     }
@@ -344,6 +342,7 @@ impl App {
                     ("J / K", "Move item under cursor down / up"),
                     ("u", "Undo"),
                     ("Ctrl+r", "Redo"),
+                    ("s", "Save"),
                     ("q", "Save and quit"),
                     ("Q", "Quit without saving"),
                 ],
@@ -526,6 +525,7 @@ impl App {
                 self.push_state();
                 self.curr_state.delete();
             }
+            Action::Save => self.save()?,
             Action::SaveQuit => return Err(AppSignal::SaveAndQuit),
             Action::NoSaveQuit => return Err(AppSignal::NoSave),
             Action::ShowHelp => self.curr_state.show_help(),
@@ -534,6 +534,29 @@ impl App {
             Action::Redo => self.redo(),
             Action::ToggleFullscreen => self.fullscreen = !self.fullscreen,
         }
+        Ok(())
+    }
+
+    fn save(&self) -> io::Result<()> {
+        let path = &self.file_path;
+        if self.curr_state.todos.is_empty()
+            && self.curr_state.dones.is_empty()
+            && !self.file_path.exists()
+        {
+            return Ok(());
+        }
+        let tmp_path = self.file_path.with_extension("tmp");
+        let mut tmp_file = File::create(&tmp_path)?;
+        let mut write_to_file = |strs: &[String], str_begin: &str| -> io::Result<()> {
+            for s in strs {
+                writeln!(tmp_file, "{}{}", str_begin, s)?;
+            }
+            Ok(())
+        };
+        write_to_file(&self.curr_state.todos, globals::TODO_PREFIX)?;
+        write_to_file(&self.curr_state.dones, globals::DONE_PREFIX)?;
+        tmp_file.flush()?;
+        std::fs::rename(tmp_path, path)?;
         Ok(())
     }
 }
