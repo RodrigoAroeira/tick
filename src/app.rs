@@ -267,7 +267,6 @@ impl App {
                     Mode::Normal => {
                         if let Ok(action) = Action::try_from(event) {
                             self.execute_action(action)?;
-                            self.curr_state.clamp_indexes();
                         }
                     }
                     Mode::Insert(_) => {
@@ -284,6 +283,7 @@ impl App {
                 Event::Resize(x, y) => r.set_size((x, y)),
                 _ => {}
             }
+            self.curr_state.clamp_indexes();
         }
     }
 
