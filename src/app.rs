@@ -255,7 +255,6 @@ impl App {
     fn main_loop(&mut self) -> Result<(), AppSignal> {
         let mut r = Renderer::new()?;
         loop {
-            self.curr_state.clamp_indexes();
             r.clear()?;
             self.write_screen(&mut r)?;
             r.present()?;
@@ -268,6 +267,7 @@ impl App {
                     Mode::Normal => {
                         if let Ok(action) = Action::try_from(event) {
                             self.execute_action(action)?;
+                            self.curr_state.clamp_indexes();
                         }
                     }
                     Mode::Insert(_) => {
