@@ -312,7 +312,7 @@ impl App {
         Ok(())
     }
 
-    fn write_status(&self, r: &mut Renderer, term_size: (u16, u16)) -> io::Result<()> {
+    fn write_status(&self, r: &mut Renderer, (rows, cols): (u16, u16)) -> io::Result<()> {
         let txt = match self.curr_state.mode {
             Mode::Normal => "NORMAL",
             Mode::Insert(InsertMode::New) => "INSERT",
@@ -320,7 +320,14 @@ impl App {
             Mode::Help => "HELP",
         };
 
-        r.text((0, term_size.1 - 1), txt, true)
+        let last_line = cols - 1;
+        let help_txt = "Press F1 for help";
+        r.text(
+            ((rows - help_txt.chars().count() as u16) / 2, last_line),
+            help_txt,
+            true,
+        )?;
+        r.text((0, last_line), txt, true)
     }
 
     fn help_lines(cols: usize) -> Vec<String> {
