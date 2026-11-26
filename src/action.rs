@@ -45,6 +45,7 @@ impl TryFrom<KeyEvent> for Action {
             Right if !m.contains(M::SHIFT) => Self::SwitchTab(TA::Right),
             Left if !m.contains(M::SHIFT) => Self::SwitchTab(TA::Left),
             Char('n') => Self::ShowNumber,
+            Char('f') => Self::ToggleFullscreen,
 
             // ── Insert / Edit ───────────────────────────────
             Char('i') => Self::Insert(Up),
@@ -84,9 +85,6 @@ impl TryFrom<KeyEvent> for Action {
             Char('q') => Self::SaveQuit,
             Char('Q') => Self::NoSaveQuit,
             Char('c') if m.contains(M::CONTROL) => Self::NoSaveQuit,
-
-            // ── Toggle Fullscreen ──────────────────────────────
-            Char('f') => Self::ToggleFullscreen,
 
             // ── Fallback ───────────────────────────────────
             _ => return Err(()),
