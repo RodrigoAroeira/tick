@@ -1,7 +1,6 @@
 TODO: Implement scrolling
 TODO: Implement sub-todos (completes outer when all subs are complete)
 TODO: Organize code under impl App
-TODO: Implement undo
 DONE: Implement insert logic
 DONE: Implement item move
 DONE: Fix save logic (only saves if there is any item in the vectors)
@@ -14,3 +13,4 @@ DONE: Implement <C-c> handling
 DONE: Implement arrow key movement
 DONE: Fix line splitting for dones
 DONE: Fix line splitting indexing
+DONE: Implement undo
